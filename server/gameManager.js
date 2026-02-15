@@ -1,29 +1,85 @@
 const { createGrid, processMove, checkWinCondition } = require('./utils');
 
+const MAX_ROOMS = 50;
+const ROOM_MAX_AGE_MS = 30 * 60 * 1000;        // 30 minutes
+const WAITING_ROOM_MAX_AGE_MS = 15 * 60 * 1000; // 15 minutes
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;      // every 5 minutes
+
 class GameManager {
     constructor(io) {
         this.io = io;
         this.rooms = new Map(); // roomId -> roomState
+
+        // --- Auto-cleanup stale rooms ---
+        this.cleanupInterval = setInterval(() => {
+            this.cleanupStaleRooms();
+        }, CLEANUP_INTERVAL_MS);
+    }
+
+    cleanupStaleRooms() {
+        const now = Date.now();
+        let cleaned = 0;
+
+        for (const [roomId, room] of this.rooms) {
+            const age = now - room.createdAt;
+
+            // Delete rooms older than 30 min
+            if (age > ROOM_MAX_AGE_MS) {
+                this.io.to(roomId).emit('error', 'Room expired due to inactivity');
+                this.rooms.delete(roomId);
+                cleaned++;
+                continue;
+            }
+
+            // Delete waiting rooms older than 15 min (never started)
+            if (room.status === 'waiting' && age > WAITING_ROOM_MAX_AGE_MS) {
+                this.io.to(roomId).emit('error', 'Room expired — game was never started');
+                this.rooms.delete(roomId);
+                cleaned++;
+                continue;
+            }
+
+            // Delete finished rooms older than 5 min
+            if (room.status === 'finished' && age > 5 * 60 * 1000) {
+                this.rooms.delete(roomId);
+                cleaned++;
+            }
+        }
+
+        if (cleaned > 0) {
+            console.log(`Cleaned up ${cleaned} stale room(s). Active rooms: ${this.rooms.size}`);
+        }
     }
 
     handleConnection(socket) {
         socket.on('createRoom', ({ playerName, gridSize = { rows: 9, cols: 6 } }) => {
+            // --- Room cap ---
+            if (this.rooms.size >= MAX_ROOMS) {
+                socket.emit('error', 'Server is at capacity. Please try again later.');
+                return;
+            }
+
+            // --- Sanitize grid size ---
+            const rows = Math.min(Math.max(Math.floor(gridSize.rows) || 9, 3), 15);
+            const cols = Math.min(Math.max(Math.floor(gridSize.cols) || 6, 3), 10);
+
             const roomId = Math.random().toString(36).substring(2, 7).toUpperCase();
             const player = { id: socket.id, name: playerName, color: this.getRandomColor() };
 
             this.rooms.set(roomId, {
                 id: roomId,
                 players: [player],
-                grid: createGrid(gridSize.rows, gridSize.cols),
+                grid: createGrid(rows, cols),
                 turnIndex: 0,
                 status: 'waiting', // waiting, playing, finished
-                gridSize,
-                winner: null
+                gridSize: { rows, cols },
+                winner: null,
+                createdAt: Date.now()  // timestamp for cleanup
             });
 
             socket.join(roomId);
             socket.emit('roomCreated', { roomId, player });
-            console.log(`Room ${roomId} created by ${playerName}`);
+            console.log(`Room ${roomId} created by ${playerName} (${this.rooms.size} active rooms)`);
         });
 
         socket.on('joinRoom', ({ roomId, playerName }) => {
@@ -67,6 +123,10 @@ class GameManager {
 
             const currentPlayer = room.players[room.turnIndex];
             if (currentPlayer.id !== socket.id) return;
+
+            // --- Validate row/col are numbers within bounds ---
+            if (typeof row !== 'number' || typeof col !== 'number') return;
+            if (row < 0 || row >= room.gridSize.rows || col < 0 || col >= room.gridSize.cols) return;
 
             // Logic to process move
             const { valid, newGrid, nextTurnIndex, winner, eliminatedPlayers } = processMove(room, row, col);

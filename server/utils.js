@@ -40,7 +40,7 @@ function processMove(room, row, col) {
         pendingExplosions.push(cell);
     }
 
-    const stabilizationLimit = 5000;
+    const stabilizationLimit = 1000;
     let iterations = 0;
 
     while (pendingExplosions.length > 0 && iterations < stabilizationLimit) {
