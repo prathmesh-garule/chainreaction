@@ -1,0 +1,8 @@
+{
+    "name": "chain-reaction-root",
+    "private": true,
+    "workspaces": [
+        "client-app",
+        "server"
+    ]
+}
