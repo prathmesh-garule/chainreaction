@@ -6,9 +6,9 @@ const GameBoard = ({ grid, onCellClick, players }) => {
 
     return (
         <div
-            className="grid gap-1 bg-gray-800 p-2 rounded-lg shadow-2xl border border-gray-700 mx-auto"
+            className="grid gap-2 p-3 sm:p-4 rounded-xl mx-auto touch-manipulation"
             style={{
-                gridTemplateColumns: `repeat(${grid[0].length}, minmax(40px, 1fr))`,
+                gridTemplateColumns: `repeat(${grid[0].length}, minmax(0, 1fr))`,
             }}
         >
             {grid.map((row, rIndex) => (
